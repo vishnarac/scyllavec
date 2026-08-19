@@ -1,0 +1,54 @@
+[package]
+name = "scyllavec-sidecar"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sidecar"
+path = "src/main.rs"
+
+[dependencies]
+# ScyllaDB async driver
+scylla = "0.13"
+
+# HNSW approximate nearest neighbor
+instant-distance = "0.6"
+
+# gRPC
+tonic = "0.11"
+prost = "0.12"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Compression for snapshot blobs
+flate2 = "1"
+
+# Error handling
+anyhow = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config from env
+envy = "0.4"
+
+# UUIDs
+uuid = { version = "1", features = ["v4", "v7"] }
+
+# Metrics
+prometheus = "0.13"
+axum = "0.7"                 # lightweight HTTP for /metrics + /health
+
+[build-dependencies]
+tonic-build = "0.11"

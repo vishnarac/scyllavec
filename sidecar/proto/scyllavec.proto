@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package scyllavec;
+
+service VectorIndex {
+    // Insert or update a vector in the in-memory HNSW index
+    rpc Upsert (UpsertRequest) returns (UpsertResponse);
+
+    // Remove a vector from the index
+    rpc Delete (DeleteRequest) returns (DeleteResponse);
+
+    // Approximate nearest neighbour search — returns top-k IDs + distances
+    rpc Search (SearchRequest) returns (SearchResponse);
+
+    // Force a snapshot of the current index to ScyllaDB
+    rpc Snapshot (SnapshotRequest) returns (SnapshotResponse);
+
+    // Health / readiness
+    rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+message UpsertRequest {
+    string collection = 1;
+    string vector_id  = 2;   // UUID string
+    repeated float embedding = 3;
+}
+
+message UpsertResponse {
+    bool success = 1;
+}
+
+message DeleteRequest {
+    string collection = 1;
+    string vector_id  = 2;
+}
+
+message DeleteResponse {
+    bool success = 1;
+}
+
+message SearchRequest {
+    string collection    = 1;
+    repeated float query = 2;
+    uint32 top_k         = 3;
+}
+
+message SearchResult {
+    string vector_id = 1;
+    float  distance  = 2;
+}
+
+message SearchResponse {
+    repeated SearchResult results = 1;
+}
+
+message SnapshotRequest {
+    string collection = 1;
+}
+
+message SnapshotResponse {
+    bool   success  = 1;
+    uint64 version  = 2;
+    uint64 nodes    = 3;
+}
+
+message HealthRequest {}
+message HealthResponse {
+    string status = 1;   // "ok" | "degraded"
+}

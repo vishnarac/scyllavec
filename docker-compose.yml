@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: scyllavec-scylla
+    command: --smp 2 --memory 1G --overprovisioned 1 --developer-mode 1
+    ports:
+      - "9042:9042"   # CQL
+      - "9180:9180"   # Prometheus metrics
+    volumes:
+      - scylla-data:/var/lib/scylla
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  sidecar:
+    build:
+      context: ./sidecar
+      dockerfile: Dockerfile
+    container_name: scyllavec-sidecar
+    environment:
+      SCYLLA_HOSTS: scylla:9042
+      SCYLLA_KEYSPACE: scyllavec
+      SIDECAR_GRPC_PORT: "50051"
+      RUST_LOG: info
+    ports:
+      - "50051:50051"  # gRPC
+    depends_on:
+      scylla:
+        condition: service_healthy
+    restart: on-failure
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: scyllavec-api
+    environment:
+      SCYLLA_HOSTS: scylla:9042
+      SCYLLA_KEYSPACE: scyllavec
+      SIDECAR_URL: http://sidecar:50051
+      API_PORT: "8000"
+    ports:
+      - "8000:8000"    # REST API
+    depends_on:
+      scylla:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  scylla-data:
