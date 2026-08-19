@@ -23,8 +23,6 @@ Client / AI Agent
 **Prerequisites:** Docker + Docker Compose, Python 3.11+
 
 ```bash
-cd /Users/vishnuc/Documents/Repos/scyllavec
-
 # Start everything (ScyllaDB + Rust sidecar + Python API)
 bash scripts/dev.sh
 ```
