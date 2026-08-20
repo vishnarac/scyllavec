@@ -1,14 +1,15 @@
-FROM rust:1.78-slim AS builder
+FROM rust:1.85-slim AS builder
 
 WORKDIR /app
 
 # Required for tonic-build (protobuf compiler)
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
-COPY sidecar/Cargo.toml sidecar/Cargo.lock* ./
-COPY sidecar/build.rs ./
-COPY sidecar/proto ./proto
-COPY sidecar/src ./src
+# Build context is ./sidecar — paths are relative to that directory
+COPY Cargo.toml Cargo.lock* ./
+COPY build.rs ./
+COPY proto ./proto
+COPY src ./src
 
 RUN cargo build --release
 

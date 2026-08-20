@@ -6,7 +6,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
+COPY sdk/ ./sdk/
+RUN pip install --no-cache-dir .
 
 COPY api/ ./api/
 COPY sidecar/proto/ ./proto/

@@ -20,6 +20,9 @@ def get_stub() -> pb_grpc.VectorIndexStub:
     global _channel, _stub
     if _stub is None:
         url = os.getenv("SIDECAR_URL", "localhost:50051")
+        # Strip any scheme prefix — gRPC channels need bare host:port
+        if "://" in url:
+            url = url.split("://", 1)[1]
         _channel = grpc.insecure_channel(url)
         _stub = pb_grpc.VectorIndexStub(_channel)
     return _stub
@@ -55,6 +58,12 @@ def snapshot(collection: str) -> dict:
     stub = get_stub()
     resp = stub.Snapshot(pb.SnapshotRequest(collection=collection))
     return {"success": resp.success, "version": resp.version, "nodes": resp.nodes}
+
+
+def evict(collection: str) -> bool:
+    stub = get_stub()
+    resp = stub.DropCollection(pb.DropCollectionRequest(collection=collection))
+    return resp.success
 
 
 def health() -> str:

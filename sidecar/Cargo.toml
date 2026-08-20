@@ -44,7 +44,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 envy = "0.4"
 
 # UUIDs
-uuid = { version = "1", features = ["v4", "v7"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 
 # Metrics
 prometheus = "0.13"

@@ -22,12 +22,17 @@ def get_session() -> Session:
 
 def init_db() -> Session:
     global _session
-    hosts = os.getenv("SCYLLA_HOSTS", "127.0.0.1").split(",")
+    raw_hosts = os.getenv("SCYLLA_HOSTS", "127.0.0.1").split(",")
     keyspace = os.getenv("SCYLLA_KEYSPACE", "scyllavec")
 
-    log.info("Connecting to ScyllaDB: hosts=%s keyspace=%s", hosts, keyspace)
+    # Strip any :port suffix — Cluster takes hosts and port separately
+    hosts = [h.split(":")[0] for h in raw_hosts]
+    port = int(raw_hosts[0].split(":")[1]) if ":" in raw_hosts[0] else 9042
+
+    log.info("Connecting to ScyllaDB: hosts=%s port=%d keyspace=%s", hosts, port, keyspace)
     cluster = Cluster(
         contact_points=hosts,
+        port=port,
         load_balancing_policy=TokenAwarePolicy(DCAwareRoundRobinPolicy()),
         protocol_version=4,
     )

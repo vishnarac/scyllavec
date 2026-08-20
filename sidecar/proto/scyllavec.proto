@@ -15,6 +15,9 @@ service VectorIndex {
     // Force a snapshot of the current index to ScyllaDB
     rpc Snapshot (SnapshotRequest) returns (SnapshotResponse);
 
+    // Evict a collection from the in-memory registry (called on collection deletion)
+    rpc DropCollection (DropCollectionRequest) returns (DropCollectionResponse);
+
     // Health / readiness
     rpc Health (HealthRequest) returns (HealthResponse);
 }
@@ -61,6 +64,14 @@ message SnapshotResponse {
     bool   success  = 1;
     uint64 version  = 2;
     uint64 nodes    = 3;
+}
+
+message DropCollectionRequest {
+    string collection = 1;
+}
+
+message DropCollectionResponse {
+    bool success = 1;
 }
 
 message HealthRequest {}

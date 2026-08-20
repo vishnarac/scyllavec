@@ -86,36 +86,59 @@ def delete_collection(name: str):
     session.execute("DELETE FROM collections WHERE name = %s", (name,))
     session.execute("DELETE FROM vectors WHERE collection = %s", (name,))
     session.execute("DELETE FROM index_snapshots WHERE collection = %s", (name,))
+    # Evict from sidecar in-memory registry (best-effort — ignore if not present)
+    try:
+        sidecar.evict(name)
+    except Exception:
+        pass
 
 # ── Vectors ───────────────────────────────────────────────────────────────────
+
+# Namespace UUID for deterministic string-ID → UUID conversion
+_ID_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # DNS namespace
+
+
+def _to_uuid(vid: str) -> uuid.UUID:
+    """Convert any string ID to a UUID. Valid UUIDs pass through; others become UUID5."""
+    try:
+        return uuid.UUID(vid)
+    except ValueError:
+        return uuid.uuid5(_ID_NAMESPACE, vid)
+
 
 @app.post("/collections/{name}/vectors", status_code=status.HTTP_201_CREATED)
 def upsert_vectors(name: str, body: UpsertRequest):
     session = get_session()
     inserted = []
     for item in body.vectors:
-        vid = item.id or str(uuid.uuid4())
-        vid_uuid = uuid.UUID(vid)
-        meta_json = json.dumps(item.metadata)
+        # If no ID provided, generate a fresh UUID4
+        original_id = item.id or str(uuid.uuid4())
+        vid_uuid = _to_uuid(original_id)
+        vid = str(vid_uuid)  # canonical UUID string sent to sidecar
+
+        # Embed original string ID into metadata so we can round-trip it
+        meta = dict(item.metadata)
+        meta["_id"] = original_id
+        meta_json = json.dumps(meta)
 
         # Persist to ScyllaDB via sidecar (which also updates the HNSW index)
         ok = sidecar.upsert(name, vid, item.embedding)
         if not ok:
-            raise HTTPException(500, detail=f"Sidecar upsert failed for id={vid}")
+            raise HTTPException(500, detail=f"Sidecar upsert failed for id={original_id}")
 
         # Store metadata separately (sidecar only handles embeddings)
         session.execute(
             "UPDATE vectors SET metadata = %s WHERE collection = %s AND id = %s",
             (meta_json, name, vid_uuid),
         )
-        inserted.append(vid)
+        inserted.append(original_id)
 
     return {"inserted": len(inserted), "ids": inserted}
 
 
 @app.delete("/collections/{name}/vectors/{vector_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_vector(name: str, vector_id: str):
-    sidecar.delete(name, vector_id)
+    sidecar.delete(name, str(_to_uuid(vector_id)))
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
@@ -138,14 +161,15 @@ def search_vectors(name: str, body: SearchRequest):
     )
     meta_map = {str(r.id): json.loads(r.metadata or "{}") for r in rows}
 
-    results = [
-        {
-            "id": r["vector_id"],
+    results = []
+    for r in ann_results:
+        meta = meta_map.get(r["vector_id"], {})
+        original_id = meta.pop("_id", r["vector_id"])  # strip internal field
+        results.append({
+            "id": original_id,
             "distance": r["distance"],
-            "metadata": meta_map.get(r["vector_id"], {}),
-        }
-        for r in ann_results
-    ]
+            "metadata": meta,
+        })
     return {"results": results}
 
 # ── Snapshot ──────────────────────────────────────────────────────────────────

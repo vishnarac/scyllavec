@@ -35,16 +35,29 @@ impl VectorIndex for VectorIndexService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        // Update in-memory index
+        // Update in-memory index — lazy-create if not yet registered
         let mut reg = self.registry.write().await;
-        if let Some(idx) = reg.get_mut(&req.collection) {
-            idx.upsert(id, req.embedding);
-        } else {
-            return Err(Status::not_found(format!(
-                "collection '{}' not found — create it first via the REST API",
-                req.collection
-            )));
+        if !reg.contains_key(&req.collection) {
+            // Look up collection metadata from ScyllaDB
+            let meta = db::get_collection_meta(&self.session, &req.collection)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            match meta {
+                Some((dim, metric)) => {
+                    reg.insert(
+                        req.collection.clone(),
+                        crate::index::CollectionIndex::new(dim as usize, metric),
+                    );
+                }
+                None => {
+                    return Err(Status::not_found(format!(
+                        "collection '{}' not found — create it first via the REST API",
+                        req.collection
+                    )));
+                }
+            }
         }
+        reg.get_mut(&req.collection).unwrap().upsert(id, req.embedding);
 
         Ok(Response::new(UpsertResponse { success: true }))
     }
@@ -74,10 +87,40 @@ impl VectorIndex for VectorIndexService {
         request: Request<SearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
         let req = request.into_inner();
-        let reg = self.registry.read().await;
-        let idx = reg.get(&req.collection)
-            .ok_or_else(|| Status::not_found(format!("collection '{}' not found", req.collection)))?;
 
+        // Lazy-load the collection if not yet in the registry
+        {
+            let reg = self.registry.read().await;
+            if !reg.contains_key(&req.collection) {
+                drop(reg);
+                let meta = db::get_collection_meta(&self.session, &req.collection)
+                    .await
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                match meta {
+                    Some((dim, metric)) => {
+                        let mut reg_w = self.registry.write().await;
+                        // Double-check after acquiring write lock
+                        if !reg_w.contains_key(&req.collection) {
+                            let mut idx =
+                                crate::index::CollectionIndex::new(dim as usize, metric);
+                            db::load_collection(&self.session, &req.collection, &mut idx)
+                                .await
+                                .map_err(|e| Status::internal(e.to_string()))?;
+                            reg_w.insert(req.collection.clone(), idx);
+                        }
+                    }
+                    None => {
+                        return Err(Status::not_found(format!(
+                            "collection '{}' not found",
+                            req.collection
+                        )));
+                    }
+                }
+            }
+        }
+
+        let reg = self.registry.read().await;
+        let idx = reg.get(&req.collection).unwrap();
         let results = idx.search(&req.query, req.top_k as usize)
             .into_iter()
             .map(|(id, dist)| SearchResult {
@@ -108,6 +151,16 @@ impl VectorIndex for VectorIndexService {
             version: chrono::Utc::now().timestamp_millis() as u64,
             nodes,
         }))
+    }
+
+    async fn drop_collection(
+        &self,
+        request: Request<DropCollectionRequest>,
+    ) -> Result<Response<DropCollectionResponse>, Status> {
+        let req = request.into_inner();
+        let mut reg = self.registry.write().await;
+        reg.remove(&req.collection);
+        Ok(Response::new(DropCollectionResponse { success: true }))
     }
 
     async fn health(

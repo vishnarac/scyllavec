@@ -36,13 +36,13 @@ services:
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     container_name: scyllavec-api
     environment:
       SCYLLA_HOSTS: scylla:9042
       SCYLLA_KEYSPACE: scyllavec
-      SIDECAR_URL: http://sidecar:50051
+      SIDECAR_URL: sidecar:50051
       API_PORT: "8000"
     ports:
       - "8000:8000"    # REST API
