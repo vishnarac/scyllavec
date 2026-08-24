@@ -48,7 +48,7 @@ class UpsertRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: list[float]
     top_k: int = Field(default=10, ge=1, le=1000)
-    filter: dict[str, Any] = {}    # metadata filter (phase 2)
+    filter: dict[str, Any] = {}    # exact-match metadata filter: {"key": value, ...}
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
@@ -142,17 +142,24 @@ def delete_vector(name: str, vector_id: str):
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
+def _matches_filter(meta: dict[str, Any], f: dict[str, Any]) -> bool:
+    """Return True if every key/value in f matches the metadata dict."""
+    return all(meta.get(k) == v for k, v in f.items())
+
+
 @app.post("/collections/{name}/search")
 def search_vectors(name: str, body: SearchRequest):
     session = get_session()
 
-    # ANN search via sidecar
-    ann_results = sidecar.search(name, body.query, body.top_k)
+    # When a filter is present, over-fetch from ANN so post-filtering has
+    # enough candidates to still return top_k results.
+    fetch_k = body.top_k if not body.filter else min(body.top_k * 10, 1000)
+    ann_results = sidecar.search(name, body.query, fetch_k)
 
     if not ann_results:
         return {"results": []}
 
-    # Fetch metadata for returned IDs
+    # Fetch metadata for all returned IDs in one CQL round-trip
     ids = [uuid.UUID(r["vector_id"]) for r in ann_results]
     id_list = ", ".join(["%s"] * len(ids))
     rows = session.execute(
@@ -165,11 +172,16 @@ def search_vectors(name: str, body: SearchRequest):
     for r in ann_results:
         meta = meta_map.get(r["vector_id"], {})
         original_id = meta.pop("_id", r["vector_id"])  # strip internal field
+        if body.filter and not _matches_filter(meta, body.filter):
+            continue
         results.append({
             "id": original_id,
             "distance": r["distance"],
             "metadata": meta,
         })
+        if len(results) == body.top_k:
+            break
+
     return {"results": results}
 
 # ── Snapshot ──────────────────────────────────────────────────────────────────

@@ -105,3 +105,61 @@ def test_snapshot(client):
     r = client.post(f"/collections/{COLLECTION}/snapshot")
     assert r.status_code == 200
     assert r.json()["success"] is True
+
+
+# ── Phase 4: metadata filtering ───────────────────────────────────────────────
+
+def test_filter_returns_matching_only(client):
+    """Filter on a metadata field — results must all carry that field value."""
+    # Insert two groups: tag=a and tag=b
+    vectors = (
+        [{"id": f"a-{i}", "embedding": rand_vec(), "metadata": {"tag": "a"}} for i in range(5)]
+        + [{"id": f"b-{i}", "embedding": rand_vec(), "metadata": {"tag": "b"}} for i in range(5)]
+    )
+    r = client.post(f"/collections/{COLLECTION}/vectors", json={"vectors": vectors})
+    assert r.status_code == 201
+
+    r = client.post(f"/collections/{COLLECTION}/search", json={
+        "query": rand_vec(),
+        "top_k": 10,
+        "filter": {"tag": "a"},
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) > 0
+    assert all(res["metadata"]["tag"] == "a" for res in results), \
+        "All filtered results must have tag=a"
+
+
+def test_filter_no_match_returns_empty(client):
+    """A filter that matches nothing must return an empty result list."""
+    r = client.post(f"/collections/{COLLECTION}/search", json={
+        "query": rand_vec(),
+        "top_k": 5,
+        "filter": {"tag": "nonexistent"},
+    })
+    assert r.status_code == 200
+    assert r.json()["results"] == []
+
+
+def test_filter_multi_key(client):
+    """Multi-key filter: all conditions must hold simultaneously."""
+    vectors = [
+        {"id": "mk-1", "embedding": rand_vec(), "metadata": {"tag": "a", "score": 1}},
+        {"id": "mk-2", "embedding": rand_vec(), "metadata": {"tag": "a", "score": 2}},
+        {"id": "mk-3", "embedding": rand_vec(), "metadata": {"tag": "b", "score": 1}},
+    ]
+    r = client.post(f"/collections/{COLLECTION}/vectors", json={"vectors": vectors})
+    assert r.status_code == 201
+
+    r = client.post(f"/collections/{COLLECTION}/search", json={
+        "query": rand_vec(),
+        "top_k": 10,
+        "filter": {"tag": "a", "score": 1},
+    })
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) > 0
+    for res in results:
+        assert res["metadata"]["tag"] == "a"
+        assert res["metadata"]["score"] == 1
