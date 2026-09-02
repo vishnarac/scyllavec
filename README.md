@@ -164,7 +164,7 @@ scyllavec/
 - [x] Phase 1 — Storage layer (ScyllaDB schema, CQL read/write)
 - [x] Phase 2 — HNSW sidecar (Rust, in-memory index, snapshot/WAL)
 - [x] Phase 3 — REST API + Python SDK
-- [ ] Phase 4 — Metadata filtering (server-side, pre/post-filter modes)
+- [x] Phase 4 — Metadata filtering (server-side, pre/post-filter modes)
 - [ ] Phase 5 — Benchmarks vs Pinecone, pgvector, Chroma, Weaviate
 - [ ] Phase 6 — LangChain / LlamaIndex adapter
 - [ ] Phase 7 — Multi-node index sharding
