@@ -110,6 +110,67 @@ with ScyllaVecClient("http://localhost:8000") as client:
 
 ---
 
+## LangChain Integration
+
+```python
+pip install langchain-core sentence-transformers
+```
+
+```python
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from scyllavec.langchain import ScyllaVecVectorStore
+
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+# Create a collection and index documents in one call
+store = ScyllaVecVectorStore.from_texts(
+    texts=["ScyllaDB is fast", "Vector search is powerful"],
+    embedding=embeddings,
+    collection="docs",
+    dimension=384,
+)
+
+# Semantic search
+docs = store.similarity_search("high performance database", k=3)
+
+# Semantic search with metadata filter
+docs = store.similarity_search("database", k=3, filter={"category": "infra"})
+
+# With similarity scores
+results = store.similarity_search_with_score("embeddings", k=5)
+for doc, score in results:
+    print(f"[{score:.4f}] {doc.page_content}")
+```
+
+---
+
+## LlamaIndex Integration
+
+```python
+pip install llama-index-core
+```
+
+```python
+from llama_index.core import VectorStoreIndex, StorageContext
+from scyllavec.llamaindex import ScyllaVecVectorStore
+
+vector_store = ScyllaVecVectorStore(
+    collection="docs",
+    dimension=384,
+    base_url="http://localhost:8000",
+)
+
+# Build an index from documents
+storage_context = StorageContext.from_defaults(vector_store=vector_store)
+index = VectorStoreIndex.from_documents(documents, storage_context=storage_context)
+
+# Query
+query_engine = index.as_query_engine(similarity_top_k=5)
+response = query_engine.query("What is ScyllaDB?")
+```
+
+---
+
 ## Project Structure
 
 ```
@@ -166,5 +227,5 @@ scyllavec/
 - [x] Phase 3 — REST API + Python SDK
 - [x] Phase 4 — Metadata filtering (server-side, pre/post-filter modes)
 - [ ] Phase 5 — Benchmarks vs Pinecone, pgvector, Chroma, Weaviate
-- [ ] Phase 6 — LangChain / LlamaIndex adapter
+- [x] Phase 6 — LangChain / LlamaIndex adapter
 - [ ] Phase 7 — Multi-node index sharding
