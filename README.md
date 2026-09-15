@@ -65,8 +65,8 @@ docker compose down
 | `DELETE` | `/collections/{name}` | Drop a collection |
 | `POST` | `/collections/{name}/vectors` | Upsert vectors (batch) |
 | `DELETE` | `/collections/{name}/vectors/{id}` | Delete a vector |
-| `POST` | `/collections/{name}/search` | ANN search |
-| `POST` | `/collections/{name}/snapshot` | Force HNSW snapshot |
+| `POST` | `/collections/{name}/search` | ANN search (with optional metadata filter) |
+| `POST` | `/collections/{name}/snapshot` | Force HNSW snapshot to ScyllaDB |
 | `GET` | `/health` | Liveness check |
 
 ### Example
@@ -80,12 +80,17 @@ curl -X POST http://localhost:8000/collections \
 # Upsert vectors
 curl -X POST http://localhost:8000/collections/docs/vectors \
   -H "Content-Type: application/json" \
-  -d '{"vectors":[{"id":"v1","embedding":[0.1,0.2,...],"metadata":{"title":"hello"}}]}'
+  -d '{"vectors":[{"id":"v1","embedding":[0.1,0.2,...],"metadata":{"title":"hello","category":"infra"}}]}'
 
-# Search
+# Search (no filter)
 curl -X POST http://localhost:8000/collections/docs/search \
   -H "Content-Type: application/json" \
   -d '{"query":[0.1,0.2,...],"top_k":5}'
+
+# Search with metadata filter
+curl -X POST http://localhost:8000/collections/docs/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":[0.1,0.2,...],"top_k":5,"filter":{"category":"infra"}}'
 ```
 
 ---
@@ -93,26 +98,47 @@ curl -X POST http://localhost:8000/collections/docs/search \
 ## Python SDK
 
 ```python
-from sdk.scyllavec import ScyllaVecClient
+from scyllavec import ScyllaVecClient
 
 with ScyllaVecClient("http://localhost:8000") as client:
     client.create_collection("docs", dimension=384, metric="cosine")
 
     client.upsert("docs", [
-        {"id": "doc-1", "embedding": [...], "metadata": {"title": "Hello"}},
-        {"id": "doc-2", "embedding": [...], "metadata": {"title": "World"}},
+        {"id": "doc-1", "embedding": [...], "metadata": {"title": "Hello", "tag": "a"}},
+        {"id": "doc-2", "embedding": [...], "metadata": {"title": "World", "tag": "b"}},
     ])
 
+    # Plain search
     results = client.search("docs", query=[...], top_k=5)
+
+    # Filtered search — only return vectors where tag == "a"
+    results = client.search("docs", query=[...], top_k=5, filter={"tag": "a"})
+
     for r in results:
         print(r["id"], r["distance"], r["metadata"])
 ```
 
 ---
 
-## LangChain Integration
+## Metadata Filtering
+
+Pass a `filter` dict to any search call to restrict results to vectors whose metadata matches **all** supplied key/value pairs (exact equality, AND logic).
 
 ```python
+# Single field
+client.search("docs", query=[...], top_k=10, filter={"category": "science"})
+
+# Multiple fields (both must match)
+client.search("docs", query=[...], top_k=10, filter={"category": "science", "year": 2024})
+```
+
+Filtering is implemented as **post-filter**: the sidecar returns up to `top_k × 10` ANN candidates, the API applies the filter in Python, then returns the top `top_k` matching results in distance order.
+
+---
+
+## LangChain Integration
+
+```bash
 pip install langchain-core sentence-transformers
 ```
 
@@ -146,7 +172,7 @@ for doc, score in results:
 
 ## LlamaIndex Integration
 
-```python
+```bash
 pip install llama-index-core
 ```
 
@@ -176,7 +202,7 @@ response = query_engine.query("What is ScyllaDB?")
 ```
 scyllavec/
 ├── docker-compose.yml        # Full local stack
-├── pyproject.toml            # Python dependencies
+├── pyproject.toml            # Python dependencies + optional extras
 ├── schema/
 │   └── 001_init.cql          # ScyllaDB schema
 ├── sidecar/                  # Rust HNSW index service
@@ -191,21 +217,25 @@ scyllavec/
 │       ├── db.rs             # ScyllaDB persistence + snapshots
 │       └── grpc.rs           # gRPC handlers
 ├── api/                      # Python FastAPI REST service
-│   ├── main.py               # Endpoints
+│   ├── main.py               # Endpoints + metadata filter logic
 │   ├── db.py                 # ScyllaDB connection
 │   ├── sidecar_client.py     # gRPC client for sidecar
 │   └── Dockerfile
 ├── sdk/
 │   └── scyllavec/
 │       ├── __init__.py
-│       └── client.py         # Python SDK
+│       ├── client.py         # Python SDK
+│       ├── langchain.py      # LangChain VectorStore adapter
+│       └── llamaindex.py     # LlamaIndex VectorStore adapter
 ├── tests/
-│   └── test_api.py           # Integration tests
+│   ├── test_api.py           # Integration tests (requires running stack)
+│   ├── test_langchain.py     # LangChain adapter unit tests (mocked)
+│   └── test_llamaindex.py    # LlamaIndex adapter unit tests (mocked)
 ├── scripts/
 │   ├── dev.sh                # One-command local startup
 │   ├── init_schema.sh        # Apply CQL schema
 │   └── seed.py               # Seed with sentence-transformers
-└── benchmarks/               # (Phase 5) vs Pinecone, pgvector, Chroma
+└── benchmarks/               # Phase 5 — vs pgvector, Chroma, Weaviate
 ```
 
 ---
@@ -225,7 +255,7 @@ scyllavec/
 - [x] Phase 1 — Storage layer (ScyllaDB schema, CQL read/write)
 - [x] Phase 2 — HNSW sidecar (Rust, in-memory index, snapshot/WAL)
 - [x] Phase 3 — REST API + Python SDK
-- [x] Phase 4 — Metadata filtering (server-side, pre/post-filter modes)
-- [ ] Phase 5 — Benchmarks vs Pinecone, pgvector, Chroma, Weaviate
+- [x] Phase 4 — Metadata filtering (post-filter, exact equality)
+- [ ] Phase 5 — Benchmarks vs pgvector, Chroma, Weaviate
 - [x] Phase 6 — LangChain / LlamaIndex adapter
 - [ ] Phase 7 — Multi-node index sharding
