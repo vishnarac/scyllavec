@@ -1,0 +1,8 @@
+# Benchmark dependencies — install into a fresh venv before running
+numpy>=1.26
+httpx>=0.27
+psycopg2-binary>=2.9        # pgvector via raw SQL
+pgvector>=0.2               # pgvector Python helpers
+chromadb>=0.5               # Chroma HTTP client
+weaviate-client>=4.5        # Weaviate v4 client
+rich>=13                    # pretty results table
