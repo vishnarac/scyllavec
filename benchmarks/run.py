@@ -142,41 +142,47 @@ def record(system: str, insert_vps: float, p50: float, p99: float, rec: float):
 
 if "scyllavec" in SYSTEMS:
     print("\n── ScyllaVec ──────────────────────────────────────")
-    import httpx
+    try:
+        import httpx
+    except ImportError:
+        print("  SKIP — pip install httpx")
+    else:
+        BASE = "http://localhost:8000"
+        client = httpx.Client(base_url=BASE, timeout=120)
+        try:
+            # Setup
+            client.delete(f"/collections/{COLLECTION}")
+            r = client.post("/collections", json={"name": COLLECTION, "dimension": DIM, "metric": "cosine"})
+            assert r.status_code == 201, r.text
 
-    BASE = "http://localhost:8000"
-    client = httpx.Client(base_url=BASE, timeout=120)
+            def sv_insert(batch_vecs, batch_ids):
+                payload = {"vectors": [
+                    {"id": bid, "embedding": vec} for bid, vec in zip(batch_ids, batch_vecs)
+                ]}
+                r = client.post(f"/collections/{COLLECTION}/vectors", json=payload)
+                assert r.status_code == 201, r.text
 
-    # Setup
-    client.delete(f"/collections/{COLLECTION}")
-    r = client.post("/collections", json={"name": COLLECTION, "dimension": DIM, "metric": "cosine"})
-    assert r.status_code == 201, r.text
+            def sv_search(query, k) -> list[str]:
+                r = client.post(f"/collections/{COLLECTION}/search",
+                                json={"query": query, "top_k": k})
+                assert r.status_code == 200, r.text
+                return [res["id"] for res in r.json()["results"]]
 
-    def sv_insert(batch_vecs, batch_ids):
-        payload = {"vectors": [
-            {"id": bid, "embedding": vec} for bid, vec in zip(batch_ids, batch_vecs)
-        ]}
-        r = client.post(f"/collections/{COLLECTION}/vectors", json=payload)
-        assert r.status_code == 201, r.text
+            elapsed = timed_insert(sv_insert, VECTORS, IDS)
+            vps = N / elapsed
+            print(f"  Insert: {vps:,.0f} vectors/sec")
 
-    def sv_search(query, k) -> list[str]:
-        r = client.post(f"/collections/{COLLECTION}/search",
-                        json={"query": query, "top_k": k})
-        assert r.status_code == 200, r.text
-        return [res["id"] for res in r.json()["results"]]
+            p50, p99, _ = timed_queries(sv_search)
+            print(f"  Query:  p50={p50:.1f}ms  p99={p99:.1f}ms")
 
-    elapsed = timed_insert(sv_insert, VECTORS, IDS)
-    vps = N / elapsed
-    print(f"  Insert: {vps:,.0f} vectors/sec")
+            rec = measure_recall(sv_search)
+            print(f"  Recall@{TOP_K}: {rec:.3f}")
 
-    p50, p99, _ = timed_queries(sv_search)
-    print(f"  Query:  p50={p50:.1f}ms  p99={p99:.1f}ms")
-
-    rec = measure_recall(sv_search)
-    print(f"  Recall@{TOP_K}: {rec:.3f}")
-
-    record("ScyllaVec", vps, p50, p99, rec)
-    client.close()
+            record("ScyllaVec", vps, p50, p99, rec)
+        except Exception as e:
+            print(f"  SKIP — ScyllaVec stack not reachable: {e}")
+        finally:
+            client.close()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # pgvector
