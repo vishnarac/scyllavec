@@ -12,10 +12,11 @@ Client / AI Agent
       │                  ╔════════════════════════╗
       ├─ CQL ──────────► ║  ScyllaDB  (port 9042) ║
       │                  ║  vectors               ║
-      └─ gRPC ─────────► ║  collections           ║
-  Rust Sidecar           ║  index_snapshots       ║
-  (port 50051)           ║  index_wal             ║
-  in-memory HNSW         ╚════════════════════════╝
+      └─ gRPC ─┬────────► ║  collections           ║
+  sidecar-0    │          ║  index_snapshots       ║
+  sidecar-1    │          ║  index_wal             ║
+  (HNSW shards)│          ╚════════════════════════╝
+               │  (hash-partitioned; fan-out search)
 ```
 
 ## Quick Start (local)
@@ -230,7 +231,8 @@ scyllavec/
 ├── tests/
 │   ├── test_api.py           # Integration tests (requires running stack)
 │   ├── test_langchain.py     # LangChain adapter unit tests (mocked)
-│   └── test_llamaindex.py    # LlamaIndex adapter unit tests (mocked)
+│   ├── test_llamaindex.py    # LlamaIndex adapter unit tests (mocked)
+│   └── test_sharding.py      # Phase 7 unit tests — routing, fan-out, health
 ├── scripts/
 │   ├── dev.sh                # One-command local startup
 │   ├── init_schema.sh        # Apply CQL schema
@@ -250,6 +252,27 @@ scyllavec/
 
 ---
 
+## Multi-node sharding (Phase 7)
+
+The stack runs two sidecar instances by default (`sidecar-0`, `sidecar-1`). The API service is configured via:
+
+```
+SIDECAR_URLS=sidecar-0:50051,sidecar-1:50051
+```
+
+Routing rules in [`api/sidecar_client.py`](api/sidecar_client.py):
+
+| Operation | Strategy |
+|-----------|----------|
+| `upsert` / `delete` | `hash(vector_id) % n_shards` → single shard |
+| `search` | parallel fan-out → merge by distance → global top-k |
+| `evict` / `snapshot` | broadcast to all shards |
+| `health` | all shards must report `"ok"` (otherwise `"degraded"`) |
+
+Backward compatible: set `SIDECAR_URL=host:port` (single URL, old env var) to run a single-shard deployment.
+
+---
+
 ## Roadmap
 
 - [x] Phase 1 — Storage layer (ScyllaDB schema, CQL read/write)
@@ -258,4 +281,4 @@ scyllavec/
 - [x] Phase 4 — Metadata filtering (post-filter, exact equality)
 - [ ] Phase 5 — Benchmarks vs pgvector, Chroma, Weaviate → see [`benchmarks/`](benchmarks/README.md)
 - [x] Phase 6 — LangChain / LlamaIndex adapter
-- [ ] Phase 7 — Multi-node index sharding
+- [x] Phase 7 — Multi-node index sharding

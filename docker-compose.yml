@@ -17,18 +17,40 @@ services:
       retries: 10
       start_period: 30s
 
-  sidecar:
+  # ── Sidecar shards ────────────────────────────────────────────────────────
+  # Two sidecar instances share the same ScyllaDB backend.
+  # Each holds half the in-memory HNSW index (routed by hash(vector_id) % 2).
+  # Scale horizontally by adding more shards and updating SIDECAR_URLS in api.
+
+  sidecar-0:
     build:
       context: ./sidecar
       dockerfile: Dockerfile
-    container_name: scyllavec-sidecar
+    container_name: scyllavec-sidecar-0
     environment:
       SCYLLA_HOSTS: scylla:9042
       SCYLLA_KEYSPACE: scyllavec
       SIDECAR_GRPC_PORT: "50051"
       RUST_LOG: info
     ports:
-      - "50051:50051"  # gRPC
+      - "50051:50051"
+    depends_on:
+      scylla:
+        condition: service_healthy
+    restart: on-failure
+
+  sidecar-1:
+    build:
+      context: ./sidecar
+      dockerfile: Dockerfile
+    container_name: scyllavec-sidecar-1
+    environment:
+      SCYLLA_HOSTS: scylla:9042
+      SCYLLA_KEYSPACE: scyllavec
+      SIDECAR_GRPC_PORT: "50051"
+      RUST_LOG: info
+    ports:
+      - "50052:50051"
     depends_on:
       scylla:
         condition: service_healthy
@@ -42,7 +64,8 @@ services:
     environment:
       SCYLLA_HOSTS: scylla:9042
       SCYLLA_KEYSPACE: scyllavec
-      SIDECAR_URL: sidecar:50051
+      # Comma-separated list of all sidecar shards
+      SIDECAR_URLS: sidecar-0:50051,sidecar-1:50051
       API_PORT: "8000"
     ports:
       - "8000:8000"    # REST API
