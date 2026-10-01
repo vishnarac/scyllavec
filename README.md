@@ -1,5 +1,7 @@
 # ScyllaVec
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 A vector store built on [ScyllaDB](https://www.scylladb.com/) — store, index, and search high-dimensional embeddings at scale, co-located with your operational data.
 
 ## Architecture
