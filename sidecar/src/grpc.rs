@@ -35,28 +35,39 @@ impl VectorIndex for VectorIndexService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        // Update in-memory index — lazy-create if not yet registered
-        let mut reg = self.registry.write().await;
-        if !reg.contains_key(&req.collection) {
-            // Look up collection metadata from ScyllaDB
-            let meta = db::get_collection_meta(&self.session, &req.collection)
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            match meta {
-                Some((dim, metric)) => {
-                    reg.insert(
-                        req.collection.clone(),
-                        crate::index::CollectionIndex::new(dim as usize, metric),
-                    );
-                }
-                None => {
-                    return Err(Status::not_found(format!(
-                        "collection '{}' not found — create it first via the REST API",
-                        req.collection
-                    )));
+        // Update in-memory index — lazy-load if not yet registered.
+        // Must load existing vectors first so a post-restart upsert doesn't
+        // silently discard the pre-restart contents of the index.
+        {
+            let reg = self.registry.read().await;
+            if !reg.contains_key(&req.collection) {
+                drop(reg);
+                let meta = db::get_collection_meta(&self.session, &req.collection)
+                    .await
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                match meta {
+                    Some((dim, metric)) => {
+                        let mut reg_w = self.registry.write().await;
+                        // Double-check after acquiring write lock
+                        if !reg_w.contains_key(&req.collection) {
+                            let mut idx =
+                                crate::index::CollectionIndex::new(dim as usize, metric);
+                            db::load_collection(&self.session, &req.collection, &mut idx)
+                                .await
+                                .map_err(|e| Status::internal(e.to_string()))?;
+                            reg_w.insert(req.collection.clone(), idx);
+                        }
+                    }
+                    None => {
+                        return Err(Status::not_found(format!(
+                            "collection '{}' not found — create it first via the REST API",
+                            req.collection
+                        )));
+                    }
                 }
             }
         }
+        let mut reg = self.registry.write().await;
         reg.get_mut(&req.collection).unwrap().upsert(id, req.embedding);
 
         Ok(Response::new(UpsertResponse { success: true }))
@@ -74,6 +85,24 @@ impl VectorIndex for VectorIndexService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        // Lazy-load the collection so the in-memory index is consistent even
+        // if this delete arrives before any search on a freshly restarted sidecar.
+        {
+            let reg = self.registry.read().await;
+            if !reg.contains_key(&req.collection) {
+                drop(reg);
+                if let Ok(Some((dim, metric))) =
+                    db::get_collection_meta(&self.session, &req.collection).await
+                {
+                    let mut reg_w = self.registry.write().await;
+                    if !reg_w.contains_key(&req.collection) {
+                        let mut idx = crate::index::CollectionIndex::new(dim as usize, metric);
+                        let _ = db::load_collection(&self.session, &req.collection, &mut idx).await;
+                        reg_w.insert(req.collection.clone(), idx);
+                    }
+                }
+            }
+        }
         let mut reg = self.registry.write().await;
         if let Some(idx) = reg.get_mut(&req.collection) {
             idx.delete(&id);
