@@ -281,6 +281,6 @@ Backward compatible: set `SIDECAR_URL=host:port` (single URL, old env var) to ru
 - [x] Phase 2 — HNSW sidecar (Rust, in-memory index, snapshot/WAL)
 - [x] Phase 3 — REST API + Python SDK
 - [x] Phase 4 — Metadata filtering (post-filter, exact equality)
-- [ ] Phase 5 — Benchmarks vs pgvector, Chroma, Weaviate → see [`benchmarks/`](benchmarks/README.md)
+- [x] Phase 5 — Benchmarks vs pgvector, Chroma, Weaviate → see [`benchmarks/`](benchmarks/README.md)
 - [x] Phase 6 — LangChain / LlamaIndex adapter
 - [x] Phase 7 — Multi-node index sharding

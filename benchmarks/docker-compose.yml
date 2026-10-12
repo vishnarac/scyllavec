@@ -37,7 +37,7 @@ services:
 
   # ── Weaviate ───────────────────────────────────────────────────────────────
   weaviate:
-    image: semitechnologies/weaviate:1.25.0
+    image: semitechnologies/weaviate:1.27.0
     container_name: bench-weaviate
     ports:
       - "8080:8080"

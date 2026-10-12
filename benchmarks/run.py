@@ -202,9 +202,9 @@ if "pgvector" in SYSTEMS:
         )
         conn.autocommit = True
         cur = conn.cursor()
-        register_vector(conn)
 
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        register_vector(conn)
         cur.execute(f"DROP TABLE IF EXISTS {COLLECTION}")
         cur.execute(
             f"CREATE TABLE {COLLECTION} "
@@ -224,10 +224,12 @@ if "pgvector" in SYSTEMS:
             )
 
         def pg_search(query, k) -> list[str]:
+            from pgvector.psycopg2 import register_vector
+            import numpy as np
             cur.execute(
                 f"SELECT id FROM {COLLECTION} "
-                f"ORDER BY embedding <=> %s LIMIT %s",
-                (query, k),
+                f"ORDER BY embedding <=> %s::vector LIMIT %s",
+                (np.array(query, dtype=np.float32), k),
             )
             return [row[0] for row in cur.fetchall()]
 
@@ -292,33 +294,39 @@ if "chroma" in SYSTEMS:
 if "weaviate" in SYSTEMS:
     print("\n── Weaviate ───────────────────────────────────────")
     try:
-        import weaviate
-        import weaviate.classes as wvc
+        import requests as _requests
     except ImportError:
-        print("  SKIP — pip install weaviate-client")
+        print("  SKIP — pip install requests")
     else:
-        wv = weaviate.connect_to_local(port=8080)
+        WV_BASE = "http://localhost:8080/v1"
         col_name = COLLECTION.capitalize()
-        try:
-            wv.collections.delete(col_name)
-        except Exception:
-            pass
-        wv_col = wv.collections.create(
-            col_name,
-            vectorizer_config=wvc.config.Configure.Vectorizer.none(),
-            vector_index_config=wvc.config.Configure.VectorIndex.hnsw(
-                distance_metric=wvc.config.VectorDistances.COSINE,
-            ),
-        )
+
+        # Recreate collection
+        _requests.delete(f"{WV_BASE}/schema/{col_name}")
+        _requests.post(f"{WV_BASE}/schema", json={
+            "class": col_name,
+            "vectorizer": "none",
+            "vectorIndexConfig": {"distance": "cosine"},
+        })
 
         def wv_insert(batch_vecs, batch_ids):
-            with wv_col.batch.dynamic() as batch:
-                for bid, vec in zip(batch_ids, batch_vecs):
-                    batch.add_object(properties={"item_id": bid}, vector=vec)
+            objects = [
+                {"class": col_name, "properties": {"item_id": bid}, "vector": vec}
+                for bid, vec in zip(batch_ids, batch_vecs)
+            ]
+            _requests.post(f"{WV_BASE}/batch/objects", json={"objects": objects})
 
         def wv_search(query, k) -> list[str]:
-            res = wv_col.query.near_vector(near_vector=query, limit=k)
-            return [obj.properties.get("item_id", "") for obj in res.objects]
+            r = _requests.post(
+                f"{WV_BASE}/graphql",
+                json={"query": (
+                    f'{{ Get {{ {col_name}('
+                    f'nearVector: {{vector: {query}}}, limit: {k}'
+                    f') {{ item_id }} }} }}'
+                )},
+            )
+            items = r.json().get("data", {}).get("Get", {}).get(col_name, [])
+            return [obj.get("item_id", "") for obj in items]
 
         elapsed = timed_insert(wv_insert, VECTORS, IDS)
         vps = N / elapsed
@@ -331,7 +339,6 @@ if "weaviate" in SYSTEMS:
         print(f"  Recall@{TOP_K}: {rec:.3f}")
 
         record("Weaviate", vps, p50, p99, rec)
-        wv.close()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Results table
