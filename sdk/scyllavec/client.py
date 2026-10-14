@@ -18,8 +18,14 @@ class ScyllaVecClient:
         results = client.search("docs", query=[0.1, 0.2, ...], top_k=5)
     """
 
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
-        self._client = httpx.Client(base_url=base_url, timeout=timeout)
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000",
+        api_key: str | None = None,
+        timeout: float = 30.0,
+    ):
+        headers = {"X-API-Key": api_key} if api_key else {}
+        self._client = httpx.Client(base_url=base_url, timeout=timeout, headers=headers)
 
     # ── Collections ───────────────────────────────────────────────────────────
 

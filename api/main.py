@@ -18,9 +18,11 @@ from __future__ import annotations
 import uuid
 import json
 import logging
+import os
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 
@@ -28,6 +30,24 @@ from db import init_db, get_session
 import sidecar_client as sidecar
 
 log = logging.getLogger(__name__)
+
+# ── API-key auth ─────────────────────────────────────────────────────────────
+# Set API_KEY env var to enable auth. Leave unset (or empty) for open/dev mode.
+
+_API_KEY = os.getenv("API_KEY", "").strip()
+_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _require_api_key(key: str | None = Security(_key_header)) -> None:
+    """Dependency: validates the X-API-Key header when API_KEY is configured."""
+    if not _API_KEY:
+        return  # auth disabled — dev/open mode
+    if key != _API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+            headers={"WWW-Authenticate": "X-API-Key"},
+        )
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
@@ -59,9 +79,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ScyllaVec API", version="0.1.0", lifespan=lifespan)
 
+# Router carrying the auth dependency — all protected routes hang off this.
+from fastapi import APIRouter
+_router = APIRouter(dependencies=[Depends(_require_api_key)])
+
 # ── Collections ───────────────────────────────────────────────────────────────
 
-@app.post("/collections", status_code=status.HTTP_201_CREATED)
+@_router.post("/collections", status_code=status.HTTP_201_CREATED)
 def create_collection(body: CollectionCreate):
     session = get_session()
     session.execute(
@@ -73,14 +97,14 @@ def create_collection(body: CollectionCreate):
     return {"name": body.name, "dimension": body.dimension, "metric": body.metric}
 
 
-@app.get("/collections")
+@_router.get("/collections")
 def list_collections():
     session = get_session()
     rows = session.execute("SELECT name, dimension, metric, description, created_at FROM collections")
     return [dict(r._asdict()) for r in rows]
 
 
-@app.delete("/collections/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@_router.delete("/collections/{name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_collection(name: str):
     session = get_session()
     session.execute("DELETE FROM collections WHERE name = %s", (name,))
@@ -106,7 +130,7 @@ def _to_uuid(vid: str) -> uuid.UUID:
         return uuid.uuid5(_ID_NAMESPACE, vid)
 
 
-@app.post("/collections/{name}/vectors", status_code=status.HTTP_201_CREATED)
+@_router.post("/collections/{name}/vectors", status_code=status.HTTP_201_CREATED)
 def upsert_vectors(name: str, body: UpsertRequest):
     session = get_session()
     inserted = []
@@ -136,7 +160,7 @@ def upsert_vectors(name: str, body: UpsertRequest):
     return {"inserted": len(inserted), "ids": inserted}
 
 
-@app.delete("/collections/{name}/vectors/{vector_id}", status_code=status.HTTP_204_NO_CONTENT)
+@_router.delete("/collections/{name}/vectors/{vector_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_vector(name: str, vector_id: str):
     sidecar.delete(name, str(_to_uuid(vector_id)))
 
@@ -147,7 +171,7 @@ def _matches_filter(meta: dict[str, Any], f: dict[str, Any]) -> bool:
     return all(meta.get(k) == v for k, v in f.items())
 
 
-@app.post("/collections/{name}/search")
+@_router.post("/collections/{name}/search")
 def search_vectors(name: str, body: SearchRequest):
     session = get_session()
 
@@ -186,14 +210,16 @@ def search_vectors(name: str, body: SearchRequest):
 
 # ── Snapshot ──────────────────────────────────────────────────────────────────
 
-@app.post("/collections/{name}/snapshot")
+@_router.post("/collections/{name}/snapshot")
 def trigger_snapshot(name: str):
     result = sidecar.snapshot(name)
     return result
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Register protected router + public health ─────────────────────────────────
 
-@app.get("/health")
+app.include_router(_router)
+
+@app.get("/health")   # public — no auth dependency
 def health():
     sidecar_status = sidecar.health()
     return {"api": "ok", "sidecar": sidecar_status}

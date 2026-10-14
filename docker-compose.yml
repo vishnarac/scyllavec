@@ -67,6 +67,8 @@ services:
       # Comma-separated list of all sidecar shards
       SIDECAR_URLS: sidecar-0:50051,sidecar-1:50051
       API_PORT: "8000"
+      # Uncomment and set to enable API key auth on all endpoints except /health
+      # API_KEY: "changeme"
     ports:
       - "8000:8000"    # REST API
     depends_on:
