@@ -148,8 +148,8 @@ impl VectorIndex for VectorIndexService {
             }
         }
 
-        let reg = self.registry.read().await;
-        let idx = reg.get(&req.collection).unwrap();
+        let mut reg = self.registry.write().await;
+        let idx = reg.get_mut(&req.collection).unwrap();
         let results = idx.search(&req.query, req.top_k as usize)
             .into_iter()
             .map(|(id, dist)| SearchResult {
