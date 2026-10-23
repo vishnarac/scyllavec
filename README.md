@@ -46,9 +46,12 @@ python scripts/seed.py
 # Open interactive API docs
 open http://localhost:8000/docs
 
-# Run integration tests
-pip install pytest httpx
-pytest tests/ -v
+# Run unit tests (no stack required)
+pip install pytest httpx grpcio langchain-core llama-index-core
+pytest tests/test_sharding.py tests/test_langchain.py tests/test_llamaindex.py tests/test_auth.py -v
+
+# Run integration tests (requires running stack)
+pytest tests/test_api.py -v
 ```
 
 ### Stop
