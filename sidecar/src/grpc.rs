@@ -1,5 +1,6 @@
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use scylla::Session;
@@ -148,9 +149,20 @@ impl VectorIndex for VectorIndexService {
             }
         }
 
+        // Build allowlist from candidate_ids if provided.
+        let allowlist: Option<HashSet<Uuid>> = if req.candidate_ids.is_empty() {
+            None
+        } else {
+            Some(
+                req.candidate_ids.iter()
+                    .filter_map(|s| Uuid::from_str(s).ok())
+                    .collect(),
+            )
+        };
+
         let mut reg = self.registry.write().await;
         let idx = reg.get_mut(&req.collection).unwrap();
-        let results = idx.search(&req.query, req.top_k as usize)
+        let results = idx.search(&req.query, req.top_k as usize, allowlist.as_ref())
             .into_iter()
             .map(|(id, dist)| SearchResult {
                 vector_id: id.to_string(),

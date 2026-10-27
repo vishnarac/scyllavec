@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use instant_distance::{Builder, HnswMap, Point, Search};
@@ -115,14 +115,41 @@ impl CollectionIndex {
     }
 
     /// Search for the top-k nearest neighbours to `query`.
-    /// Uses HNSW when the collection is large enough, brute-force otherwise.
-    /// Returns `Vec<(uuid, distance)>` sorted ascending by distance.
-    pub fn search(&mut self, query: &[f32], top_k: usize) -> Vec<(Uuid, f32)> {
+    ///
+    /// `allowlist` — when `Some`, only vectors whose UUID is in the set are
+    /// considered. This implements pre-filter ANN: the API layer queries
+    /// ScyllaDB for IDs matching the metadata filter, then passes them here.
+    /// When `None`, all vectors are candidates (standard ANN).
+    ///
+    /// Uses HNSW when the collection is large enough and no allowlist is given.
+    /// Falls back to a linear scan over the allowlist when one is provided
+    /// (HNSW cannot skip arbitrary nodes, and the allowlist is typically small).
+    pub fn search(
+        &mut self,
+        query: &[f32],
+        top_k: usize,
+        allowlist: Option<&HashSet<Uuid>>,
+    ) -> Vec<(Uuid, f32)> {
         if self.vectors.is_empty() {
             return vec![];
         }
 
-        // Rebuild HNSW graph if the index is stale.
+        // Pre-filter path: linear scan restricted to the allowlist.
+        if let Some(allow) = allowlist {
+            if allow.is_empty() {
+                return vec![];
+            }
+            let mut scores: Vec<(Uuid, f32)> = allow.iter()
+                .filter_map(|id| {
+                    self.vectors.get(id).map(|emb| (*id, self.metric.distance(query, emb)))
+                })
+                .collect();
+            scores.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            scores.truncate(top_k);
+            return scores;
+        }
+
+        // Unrestricted path: use HNSW when warm, brute-force when cold/small.
         if self.dirty {
             self.rebuild();
         }
@@ -137,7 +164,6 @@ impl CollectionIndex {
                     .collect()
             }
             None => {
-                // Brute-force path (small collections or empty hnsw).
                 let mut scores: Vec<(Uuid, f32)> = self.vectors.iter()
                     .map(|(id, emb)| (*id, self.metric.distance(query, emb)))
                     .collect();

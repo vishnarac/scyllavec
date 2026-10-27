@@ -42,9 +42,12 @@ message DeleteResponse {
 }
 
 message SearchRequest {
-    string collection    = 1;
-    repeated float query = 2;
-    uint32 top_k         = 3;
+    string collection          = 1;
+    repeated float query       = 2;
+    uint32 top_k               = 3;
+    // Optional pre-filter: when non-empty, search is restricted to these IDs.
+    // The API layer populates this from a ScyllaDB metadata query.
+    repeated string candidate_ids = 4;
 }
 
 message SearchResult {

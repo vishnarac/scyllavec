@@ -175,10 +175,30 @@ def _matches_filter(meta: dict[str, Any], f: dict[str, Any]) -> bool:
 def search_vectors(name: str, body: SearchRequest):
     session = get_session()
 
-    # When a filter is present, over-fetch from ANN so post-filtering has
-    # enough candidates to still return top_k results.
-    fetch_k = body.top_k if not body.filter else min(body.top_k * 10, 1000)
-    ann_results = sidecar.search(name, body.query, fetch_k)
+    candidate_ids: list[str] | None = None
+
+    if body.filter:
+        # Pre-filter: fetch all IDs from ScyllaDB whose metadata matches.
+        # This is a full scan of the collection's metadata — acceptable because
+        # metadata is cheap JSON; the embedding list<float> is not fetched.
+        rows = session.execute(
+            "SELECT id, metadata FROM vectors WHERE collection = %s",
+            (name,),
+        )
+        candidate_uuids: list[uuid.UUID] = []
+        for row in rows:
+            meta = json.loads(row.metadata or "{}")
+            # Strip internal _id before matching so filter keys don't clash
+            meta_clean = {k: v for k, v in meta.items() if k != "_id"}
+            if _matches_filter(meta_clean, body.filter):
+                candidate_uuids.append(row.id)
+
+        if not candidate_uuids:
+            return {"results": []}
+
+        candidate_ids = [str(u) for u in candidate_uuids]
+
+    ann_results = sidecar.search(name, body.query, body.top_k, candidate_ids)
 
     if not ann_results:
         return {"results": []}
@@ -195,7 +215,10 @@ def search_vectors(name: str, body: SearchRequest):
     results = []
     for r in ann_results:
         meta = meta_map.get(r["vector_id"], {})
-        original_id = meta.pop("_id", r["vector_id"])  # strip internal field
+        original_id = meta.pop("_id", r["vector_id"])
+        # Safety post-filter: when pre-filter is active the sidecar should only
+        # return matching IDs, but we re-check here for correctness in case the
+        # sidecar is running an older build that ignores candidate_ids.
         if body.filter and not _matches_filter(meta, body.filter):
             continue
         results.append({

@@ -100,15 +100,27 @@ def upsert(collection: str, vector_id: str, embedding: list[float]) -> bool:
     return resp.success
 
 
-def search(collection: str, query: list[float], top_k: int = 10) -> list[dict]:
-    """Fan-out search to all shards, merge results, return global top-k."""
+def search(
+    collection: str,
+    query: list[float],
+    top_k: int = 10,
+    candidate_ids: list[str] | None = None,
+) -> list[dict]:
+    """Fan-out search to all shards, merge results, return global top-k.
+
+    candidate_ids: when provided, each shard only scores vectors in that set
+    (pre-filter ANN). Vectors on the wrong shard simply return no results for
+    those IDs, which is correct — they don't exist there.
+    """
     stubs = _pool.stubs
+    ids = candidate_ids or []
 
     def _search_shard(stub: pb_grpc.VectorIndexStub) -> list[dict]:
         resp = stub.Search(pb.SearchRequest(
             collection=collection,
             query=query,
             top_k=top_k,
+            candidate_ids=ids,
         ))
         return [{"vector_id": r.vector_id, "distance": r.distance} for r in resp.results]
 
