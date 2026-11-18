@@ -138,7 +138,7 @@ client.search("docs", query=[...], top_k=10, filter={"category": "science"})
 client.search("docs", query=[...], top_k=10, filter={"category": "science", "year": 2024})
 ```
 
-Filtering is implemented as **post-filter**: the sidecar returns up to `top_k × 10` ANN candidates, the API applies the filter in Python, then returns the top `top_k` matching results in distance order.
+Filtering is implemented as **pre-filter**: the API first scans the collection's metadata in ScyllaDB to build the set of matching IDs, then sends that allowlist to the sidecar, which searches only those vectors. Results are exact at any selectivity, so a filter matching 1% of the data still returns `top_k` hits. The cost is an O(n) metadata scan in ScyllaDB per filtered query; a secondary/inverted index is a possible future optimisation.
 
 ---
 
@@ -283,7 +283,7 @@ Backward compatible: set `SIDECAR_URL=host:port` (single URL, old env var) to ru
 - [x] Phase 1 — Storage layer (ScyllaDB schema, CQL read/write)
 - [x] Phase 2 — HNSW sidecar (Rust, in-memory index, snapshot/WAL)
 - [x] Phase 3 — REST API + Python SDK
-- [x] Phase 4 — Metadata filtering (post-filter, exact equality)
+- [x] Phase 4 — Metadata filtering (pre-filter, exact equality)
 - [x] Phase 5 — Benchmarks vs pgvector, Chroma, Weaviate → see [`benchmarks/`](benchmarks/README.md)
 - [x] Phase 6 — LangChain / LlamaIndex adapter
 - [x] Phase 7 — Multi-node index sharding

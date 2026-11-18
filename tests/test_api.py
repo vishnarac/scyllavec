@@ -163,3 +163,21 @@ def test_filter_multi_key(client):
     for res in results:
         assert res["metadata"]["tag"] == "a"
         assert res["metadata"]["score"] == 1
+
+
+def test_filter_low_selectivity(client):
+    """A filter matching ~1% of vectors must still return every match (pre-filter, not over-fetch)."""
+    common = [{"id": f"lc-{i}", "embedding": rand_vec(), "metadata": {"grp": "common"}} for i in range(300)]
+    rare = [{"id": f"lr-{i}", "embedding": rand_vec(), "metadata": {"grp": "rare"}} for i in range(3)]
+    r = client.post(f"/collections/{COLLECTION}/vectors", json={"vectors": common + rare})
+    assert r.status_code == 201
+
+    r = client.post(f"/collections/{COLLECTION}/search", json={
+        "query": rand_vec(),
+        "top_k": 10,
+        "filter": {"grp": "rare"},
+    })
+    assert r.status_code == 200
+    ids = {res["id"] for res in r.json()["results"]}
+    assert ids == {"lr-0", "lr-1", "lr-2"}
+

@@ -62,16 +62,19 @@ docker compose -f benchmarks/docker-compose.yml down -v
 
 | System        | Insert (v/s) | p50 (ms) | p99 (ms) | Recall@10 |
 |---------------|-------------:|---------:|---------:|----------:|
-| **ScyllaVec** |          476 |      6.4 |     10.9 | **1.000** |
-| pgvector      |          239 |      2.1 |      4.6 |     0.836 |
-| Chroma        |        1,389 |      4.2 |     13.3 |     0.897 |
-| Weaviate      |        1,878 |      4.8 |      8.0 |     0.989 |
+| **ScyllaVec** |          640 |      5.7 |     10.3 | **0.998** |
+| pgvector      |          233 |      1.6 |      3.1 |     0.834 |
+| Chroma        |        1,328 |      4.9 |      9.6 |     0.901 |
+| Weaviate      |        1,849 |      4.6 |      7.3 |     0.989 |
+
+ScyllaVec results use the real HNSW graph (`instant-distance`) in the Rust sidecar, with a single shard.
 
 **Key observations:**
 
-- ScyllaVec achieves **Recall@10 = 1.000** (exact brute-force search) at this dataset size. pgvector uses HNSW (approximate) and Chroma/Weaviate trade recall for throughput.
+- ScyllaVec reaches **Recall@10 = 0.998** with HNSW, the highest of the four systems here, at the same default config used for the others.
 - Insert throughput is bottlenecked by the HTTP+gRPC round-trip overhead per batch through the multi-layer ScyllaVec stack (REST API → gRPC sidecar → ScyllaDB). Chroma/Weaviate batch via REST directly into their own storage engine.
-- Query latency reflects the additional network hop through the Rust sidecar. At larger datasets where HNSW approximation matters, ScyllaVec's brute-force will scale linearly — the HNSW integration path in `instant-distance` is the next performance milestone.
+- Query latency (p50 5.7 ms) is slower than pgvector, Chroma and Weaviate. It includes the extra network hop through the Rust sidecar. `instant-distance` is batch-only, so the graph is rebuilt lazily on the first search after writes; the first query after an insert pays that rebuild cost.
+- This is a small, synthetic, single-machine run (5k vectors). Treat it as a sanity check, not a scale claim.
 
 ## Notes
 
